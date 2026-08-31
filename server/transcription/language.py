@@ -68,3 +68,17 @@ def resolve_asr_language(config: dict) -> str:
     if language not in {"auto", "fa", "en"}:
         return "auto"
     return language
+
+
+def streaming_asr_language(config: dict) -> str:
+    """Return the language for a *streaming* (Realtime) ASR session.
+
+    Automatic language identification (``auto``) is only supported by
+    Speechmatics in Batch mode; the Realtime engine requires an explicit ISO
+    language code. Persisting the configured default of ``auto`` silently
+    kills every live session, so map it to the app's primary language (``fa``)
+    for streaming providers. Users who need English can still pick ``en`` in
+    the settings.
+    """
+    language = resolve_asr_language(config)
+    return "fa" if language == "auto" else language

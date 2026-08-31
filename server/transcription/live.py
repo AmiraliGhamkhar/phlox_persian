@@ -15,12 +15,13 @@ import asyncio
 import io
 import json
 import logging
+import os
 import time
 import wave
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from server.transcription.language import normalize_persian_text, resolve_asr_language
+from server.transcription.language import normalize_persian_text, streaming_asr_language
 from server.utils.providers import ASR_PROVIDERS, resolve_asr_connection
 
 logger = logging.getLogger(__name__)
@@ -30,6 +31,34 @@ EmitFn = Callable[[dict[str, Any]], Awaitable[None]]
 SAMPLE_RATE = 16000
 ROLLING_WINDOW_SECONDS = 5.0
 ROLLING_HOP_SECONDS = 1.5
+
+# Speechmatics SaaS Realtime endpoints documented for production use. The
+# global host auto-routes to the nearest region; ``eu.rt.speechmatics.com`` /
+# ``us.rt.speechmatics.com`` pin a region. (The SDK's built-in EU2 default is
+# not part of the documented production set and can fail the handshake.)
+SPEECHMATICS_DEFAULT_URL = "wss://global.rt.speechmatics.com/v2"
+SPEECHMATICS_MAX_DELAY_SECONDS = 1.0
+
+
+def speechmatics_rt_url(config: dict[str, Any]) -> str:
+    """Resolve the Speechmatics Realtime endpoint for a session.
+
+    Prefers the user-configured ``ASR_BASE_URL`` (regional pinning, custom
+    runtime), falls back to the provider catalog, then to the documented
+    global endpoint. Never returns an empty URL: the SDK's
+    ``wss://eu2.rt.speechmatics.com/v2`` default is a legacy/enterprise-only
+    host and silently fails for self-service accounts.
+    """
+    url = str(config.get("ASR_BASE_URL") or config.get("WHISPER_BASE_URL") or "").strip()
+    if url:
+        return url
+    url = os.environ.get("SPEECHMATICS_RT_URL") or ""
+    if url.strip():
+        return url.strip()
+    return str(
+        (ASR_PROVIDERS.get("speechmatics") or {}).get("default_base_url")
+        or SPEECHMATICS_DEFAULT_URL
+    )
 
 
 def pcm_to_wav(pcm: bytes, sample_rate: int = SAMPLE_RATE) -> bytes:
@@ -68,6 +97,8 @@ class SpeechmaticsLiveSession(LiveSession):
         self._client = None
         self._task: asyncio.Task | None = None
         self._queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self._started = asyncio.Event()
+        self._last_error: str | None = None
 
     async def start(self) -> None:
         try:
@@ -89,15 +120,16 @@ class SpeechmaticsLiveSession(LiveSession):
         if not api_key:
             raise ValueError("A Speechmatics API key is required for live transcription")
 
-        language = resolve_asr_language(self.config)
-        speechmatics_language = "auto" if language == "auto" else language
+        # Realtime has no automatic language identification: ``auto`` (the app
+        # default, valid for Batch) must be mapped to an explicit code or the
+        # session is rejected before any audio is accepted.
+        speechmatics_language = streaming_asr_language(self.config)
         # Map the configured operating point onto the v1 ``Model`` enum; any
         # unrecognised value falls back to the default ``enhanced`` model.
         model_name = str(self.config.get("ASR_MODEL") or "enhanced").strip().lower()
         model = Model.STANDARD if model_name == "standard" else Model.ENHANCED
 
-        client_url = str(self.config.get("ASR_BASE_URL") or "").strip() or None
-        client = AsyncClient(api_key=api_key, url=client_url)
+        client = AsyncClient(api_key=api_key, url=speechmatics_rt_url(self.config))
         self._client = client
 
         async def handle_partial(message: dict) -> None:
@@ -128,9 +160,13 @@ class SpeechmaticsLiveSession(LiveSession):
         def on_final(message: dict) -> None:
             asyncio.create_task(handle_final(message))
 
+        def on_started(_message: dict) -> None:
+            self._started.set()
+
         partial_event = ServerMessageType.ADD_PARTIAL_TRANSCRIPT
         client.on(partial_event, on_partial)
         client.on(ServerMessageType.ADD_TRANSCRIPT, on_final)
+        client.on(ServerMessageType.RECOGNITION_STARTED, on_started)
 
         async def _run() -> None:
             class _QueueAudio:
@@ -150,6 +186,7 @@ class SpeechmaticsLiveSession(LiveSession):
                         language=speechmatics_language,
                         model=model,
                         enable_partials=True,
+                        max_delay=SPEECHMATICS_MAX_DELAY_SECONDS,
                     ),
                     audio_format=AudioFormat(
                         encoding=AudioEncoding.PCM_S16LE,
@@ -160,9 +197,33 @@ class SpeechmaticsLiveSession(LiveSession):
                 )
             except Exception as error:
                 logger.error("Speechmatics live session failed: %s", error)
+                self._last_error = str(error)
                 await self.emit({"type": "error", "message": str(error)})
 
         self._task = asyncio.create_task(_run())
+
+        # Do not report the live socket as ready until Speechmatics itself has
+        # accepted the session (RecognitionStarted). Otherwise the client sees
+        # "ready" and silence when the key/endpoint/quota is wrong — the exact
+        # failure mode reported with online ASR.
+        started_wait = asyncio.create_task(self._started.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {started_wait, self._task},
+                timeout=15.0,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            if not started_wait.done():
+                started_wait.cancel()
+        if self._started.is_set():
+            return
+        if self._task.done() and self._last_error:
+            raise ValueError(f"Speechmatics live session failed: {self._last_error}")
+        raise ValueError(
+            "Speechmatics live session did not start within 15 seconds; "
+            "check the API key, the region endpoint (ASR_BASE_URL), and account quotas"
+        )
 
     async def feed_pcm(self, pcm: bytes) -> None:
         self._pcm.extend(pcm)
@@ -191,6 +252,7 @@ class FireworksLiveSession(LiveSession):
         self.emit = emit
         self._pcm = bytearray()
         self._finals: list[str] = []
+        self._final_segments: dict[int, str] = {}
         self._partial = ""
         self._ws = None
         self._receiver: asyncio.Task | None = None
@@ -210,14 +272,13 @@ class FireworksLiveSession(LiveSession):
         info = ASR_PROVIDERS["fireworks"]
         model = str(self.config.get("ASR_MODEL") or config_model(self.config) or "fireworks-asr-v2")
         url = info.get("streaming_url_v2") if "v2" in model else info.get("streaming_url")
-        language = resolve_asr_language(self.config)
-        params = []
-        if language != "auto":
-            params.append(f"language={language}")
+        # Fireworks streaming expects an explicit language query parameter;
+        # ``auto`` is a Batch-only value, so map it to the app primary language.
+        language = streaming_asr_language(self.config)
+        params = [f"language={language}"]
         if model:
             params.append(f"model={model}")
-        if params:
-            url = f"{url}?{'&'.join(params)}"
+        url = f"{url}?{'&'.join(params)}"
 
         headers = {"Authorization": f"Bearer {api_key}"}
         try:
@@ -254,6 +315,36 @@ class FireworksLiveSession(LiveSession):
             payload = json.loads(message)
         except json.JSONDecodeError:
             return
+
+        # Fireworks sends segments (``[{id, text, is_final, language}]``) with
+        # each delta. Track finalized segments by id and treat the rest as the
+        # running partial, so updates stay ordered and never regress.
+        segments = payload.get("segments")
+        if isinstance(segments, list) and segments:
+            pending: list[str] = []
+            for segment in segments:
+                if not isinstance(segment, dict):
+                    continue
+                seg_text = str(segment.get("text") or "").strip()
+                seg_id = segment.get("id")
+                if not seg_text:
+                    continue
+                if segment.get("is_final") and seg_id is not None:
+                    self._final_segments[int(seg_id)] = seg_text
+                else:
+                    pending.append(seg_text)
+            finals_text = " ".join(
+                self._final_segments[key] for key in sorted(self._final_segments)
+            ).strip()
+            self._finals = [finals_text] if finals_text else []
+            self._partial = " ".join(pending).strip()
+            emit_text = _compose(self._finals, self._partial)
+            if self._partial:
+                await self.emit({"type": "partial", "text": emit_text})
+            else:
+                await self.emit({"type": "final", "text": emit_text})
+            return
+
         text = (
             payload.get("transcript") or payload.get("text") or payload.get("transcription") or ""
         )
@@ -284,9 +375,16 @@ class FireworksLiveSession(LiveSession):
     async def stop(self) -> str:
         if self._ws is not None:
             try:
-                await self._ws.send(json.dumps({"type": "end"}))
+                # Fireworks finalizes pending segments on this checkpoint.
+                await self._ws.send(json.dumps({"checkpoint_id": "final"}))
             except Exception:
                 logger.debug("Fireworks live end frame failed", exc_info=True)
+            # Give the trailing finals a moment to arrive before closing.
+            if self._receiver:
+                try:
+                    await asyncio.wait_for(self._receiver, timeout=2.0)
+                except TimeoutError:
+                    pass
             try:
                 await self._ws.close()
             except Exception:

@@ -111,11 +111,11 @@ const WhisperTab = ({
                     </NativeSelect.Root>
                 </Box>
 
-                {["openai_compatible", "openai", "whispercpp", "fireworks"].includes(
+                {["openai_compatible", "openai", "whispercpp", "fireworks", "speechmatics"].includes(
                     provider,
                 ) && (
                     <Box>
-                        <Tooltip content="نشانی پایه سرویس سازگار با OpenAI را وارد کنید.">
+                        <Tooltip content="نشانی پایه سرویس ASR را وارد کنید. برای Speechmatics می‌توانید از نشانی منطقه‌ای (مثلاً wss://us.rt.speechmatics.com/v2) یا global استفاده کنید.">
                             <Text fontSize="sm" mb="1" fontWeight="bold">
                                 نشانی پایه سرویس ASR
                             </Text>
@@ -148,7 +148,7 @@ const WhisperTab = ({
 
                 {provider === "speechmatics" && (
                     <Text fontSize="xs" color="overlay0">
-                        Speechmatics از نشانی منطقه‌ای پیش‌فرض استفاده می‌کند. در صورت نیاز می‌توانید نشانی سفارشی را در تنظیمات پیشرفته وارد کنید.
+                        Speechmatics در حالت بلادرنگ از شناسایی خودکار زبان پشتیبانی نمی‌کند؛ حالت «تشخیص خودکار» در این سرویس به فارسی (fa) نگاشت می‌شود. نشانی پیش‌فرض global است و به نزدیک‌ترین منطقه مسیریابی می‌کند.
                     </Text>
                 )}
 

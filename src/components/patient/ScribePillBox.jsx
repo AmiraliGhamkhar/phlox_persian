@@ -39,6 +39,7 @@ const ScribePillBox = ({
     onDownload,
     onDismiss,
     liveTranscript = "",
+    liveError = "",
 }) => {
     const [isDragOver, setIsDragOver] = useState(false);
 
@@ -150,6 +151,28 @@ const ScribePillBox = ({
                     zIndex={1}
                 >
                     {liveTranscript}
+                </Box>
+            ) : null}
+
+            {isRecording && liveError ? (
+                <Box
+                    position="absolute"
+                    bottom={liveTranscript ? "116px" : "72px"}
+                    left="50%"
+                    transform="translateX(-50%)"
+                    maxW="min(640px, 90vw)"
+                    px={4}
+                    py={2}
+                    borderRadius="md"
+                    bg="rgba(120, 53, 15, 0.92)"
+                    color="orange.100"
+                    fontSize="xs"
+                    dir="auto"
+                    textAlign="start"
+                    pointerEvents="none"
+                    zIndex={1}
+                >
+                    {liveError}
                 </Box>
             ) : null}
 

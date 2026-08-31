@@ -27,6 +27,7 @@ export const useScribe = ({
 
     const [sendError, setSendError] = useState(null); // null = ok, else { message }
     const [liveTranscript, setLiveTranscript] = useState("");
+    const [liveError, setLiveError] = useState(null);
     const lastFailedRef = useRef({ blob: null, meta: null, isAmbient: null });
     const liveSessionRef = useRef(null);
     // lastFailedRef shape: { blob, meta, isAmbient, liveResult }
@@ -89,6 +90,7 @@ export const useScribe = ({
         setTimer(0);
         setSendError(null);
         setLiveTranscript("");
+        setLiveError(null);
         lastFailedRef.current = { blob: null, meta: null, isAmbient: null };
         closeLiveSession();
         if (audioRecorderRef.current) {
@@ -187,16 +189,21 @@ export const useScribe = ({
         try {
             const recorder = new AudioRecorder();
             setLiveTranscript("");
+            setLiveError(null);
             try {
                 const session = await transcriptionApi.openLiveTranscription({
                     onPartial: (text) => setLiveTranscript(text || ""),
                     onFinal: (text) => setLiveTranscript(text || ""),
-                    onError: (message) => console.debug("Live transcription:", message),
+                    onError: (message) => {
+                        console.debug("Live transcription:", message);
+                        setLiveError(message);
+                    },
                 });
                 liveSessionRef.current = session;
                 recorder.onPcm = (samples) => session.sendPcm(samples);
             } catch (error) {
                 console.debug("Live transcription unavailable:", error);
+                setLiveError(error?.message || String(error));
             }
             await recorder.start();
             audioRecorderRef.current = recorder;
@@ -311,6 +318,7 @@ export const useScribe = ({
         isLoading: isTranscribing,
         sendError,
         liveTranscript,
+        liveError,
 
         // Actions
         startRecording,

@@ -11,7 +11,11 @@ from typing import Union
 import httpx
 
 from server.database.config.manager import config_manager
-from server.transcription.language import normalize_persian_text, resolve_asr_language
+from server.transcription.language import (
+    normalize_persian_text,
+    resolve_asr_language,
+    streaming_asr_language,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -209,11 +213,10 @@ async def _transcribe_speechmatics(
         raise ValueError("A Speechmatics API key is required for the selected ASR provider")
 
     pcm, sample_rate = _read_pcm_wav(audio_buffer)
-    language = resolve_asr_language(config)
-    # Speechmatics supports automatic language identification for the mixed
-    # Persian/English workflow. Keep an explicit ``fa`` or ``en`` hint when the
-    # user chooses one in settings.
-    speechmatics_language = "auto" if language == "auto" else language
+    # The whole-file path here still uses the *Realtime* engine, which has no
+    # automatic language identification. ``auto`` (valid for Batch SaaS) must
+    # be mapped to an explicit code or the session is rejected.
+    speechmatics_language = streaming_asr_language(config)
     # Map the configured operating point onto the v1 ``Model`` enum; any
     # unrecognised value falls back to the default ``enhanced`` model.
     model_name = str(config.get("ASR_MODEL") or "enhanced").strip().lower()
@@ -230,8 +233,9 @@ async def _transcribe_speechmatics(
         except (KeyError, TypeError, AttributeError):
             logger.debug("Ignoring malformed Speechmatics transcript event", exc_info=True)
 
-    client_url = str(config.get("ASR_BASE_URL") or "").strip() or None
-    client = AsyncClient(api_key=api_key, url=client_url)
+    from server.transcription.live import speechmatics_rt_url
+
+    client = AsyncClient(api_key=api_key, url=speechmatics_rt_url(config))
     client.on(ServerMessageType.ADD_TRANSCRIPT, handle_final)
     started = time.perf_counter()
     try:

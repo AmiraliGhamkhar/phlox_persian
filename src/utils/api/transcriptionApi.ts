@@ -277,6 +277,8 @@ export const transcriptionApi = {
                 if (!opened) {
                     window.clearTimeout(timer);
                     reject(new Error("Live transcription unavailable"));
+                } else {
+                    onError?.("Live transcription connection lost");
                 }
             };
             socket.onclose = () => {
