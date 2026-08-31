@@ -231,6 +231,7 @@ async def test_transcribe_audio_dispatches_parakeet():
     fake_config = {
         "ASR_PROVIDER": "local",
         "ASR_MODEL": "parakeet-tdt-0.6b-v3-int8",
+        "ASR_LANGUAGE": "en",
         "LLM_PROVIDER": "local",
     }
     from server.database.config.manager import config_manager

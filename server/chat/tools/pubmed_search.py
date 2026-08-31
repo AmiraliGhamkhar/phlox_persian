@@ -16,7 +16,10 @@ from server.chat.streaming.response import (
     end_message,
     status_message,
 )
-from server.chat.tools.sanitization import sanitize_pubmed_query
+from server.chat.tools.sanitization import (
+    sanitize_pubmed_query,
+    sanitize_query_for_external_search,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +109,14 @@ async def search_pubmed(query: str, max_results: int = 5) -> list[dict]:
     Returns:
         List of article dictionaries
     """
-    # Sanitize query to remove standalone years that PubMed interprets as keywords
+    # PHI scrub first (name / UR / MRN / DOB / phone / email / national ID),
+    # then strip standalone years that PubMed interprets as keywords. The
+    # generic scrub is what actually protects patient identifiers from
+    # leaving the app (README guarantee).
+    query = sanitize_query_for_external_search(query)
+    if not query:
+        # Entirely PHI — nothing may be sent to NCBI (LLM02:2026).
+        return []
     query = sanitize_pubmed_query(query)
 
     async with httpx.AsyncClient() as client:
@@ -187,7 +197,8 @@ async def execute(
     query = function_arguments.get("query", "")
     max_results = function_arguments.get("max_results", 5)
 
-    # Sanitize query to remove standalone years
+    # PHI scrub first, then year removal (see search_pubmed).
+    query = sanitize_query_for_external_search(query)
     query = sanitize_pubmed_query(query)
 
     # Track citations for the function response

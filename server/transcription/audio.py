@@ -12,6 +12,8 @@ from typing import Union
 
 import httpx
 
+from server.utils.ssrf import build_guarded_http_client
+
 from server.database.config.manager import config_manager
 from server.transcription.language import normalize_persian_text, resolve_asr_language
 
@@ -135,7 +137,7 @@ async def _transcribe_local_whisper(
 
     filename, content_type = _detect_audio_format(audio_buffer)
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+    async with build_guarded_http_client(timeout=httpx.Timeout(600.0)) as client:
         files = {"file": (filename, audio_buffer, content_type)}
         language = resolve_asr_language(_config)
         data = {
@@ -317,7 +319,7 @@ async def _transcribe_speechmatics(
     headers = {"Authorization": f"Bearer {api_key}"}
     started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0)) as client:
+        async with build_guarded_http_client(timeout=httpx.Timeout(60.0)) as client:
             try:
                 response = await _post_audio(
                     client,
@@ -661,7 +663,7 @@ async def _transcribe_fireworks(audio_buffer: bytes, config: dict) -> dict[str, 
         base_url = base_url[:-3]
 
     transcription_start = time.perf_counter()
-    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+    async with build_guarded_http_client(timeout=httpx.Timeout(600.0)) as client:
         try:
             response = await _post_audio(
                 client,
@@ -707,7 +709,7 @@ async def _transcribe_external_api(
 ) -> dict[str, Union[str, float]]:
     """Transcribe using an external OpenAI-compatible ASR API."""
     filename, content_type = _detect_audio_format(audio_buffer)
-    async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
+    async with build_guarded_http_client(timeout=httpx.Timeout(600.0)) as client:
         files = {"file": (filename, audio_buffer, content_type)}
         language = resolve_asr_language(config)
         data = {

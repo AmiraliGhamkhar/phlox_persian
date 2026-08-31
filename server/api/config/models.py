@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from server.constants import IS_DOCKER
 from server.database.config.manager import config_manager
 from server.utils.llama_models import llama_model_manager
+from server.utils.ssrf import build_guarded_http_client
 from server.utils.providers import (
     ASR_PROVIDERS,
     EMBEDDING_PROVIDERS,
@@ -117,7 +118,7 @@ async def get_llm_models(
             headers = {"Authorization": f"Bearer {effective_key}"} if effective_key else {}
             models_url = build_openai_v1_url(effective_url, "models")
 
-        async with httpx.AsyncClient(headers=headers) as client:
+        async with build_guarded_http_client(headers=headers) as client:
             try:
                 response = await client.get(models_url, timeout=5.0)
                 if response.status_code == 200:
@@ -167,7 +168,7 @@ async def get_embedding_models(
         )
         headers = {"Authorization": f"Bearer {effective_key}"} if effective_key else {}
         models_url = build_openai_v1_url(effective_url, "models")
-        async with httpx.AsyncClient(headers=headers) as client:
+        async with build_guarded_http_client(headers=headers) as client:
             try:
                 response = await client.get(models_url, timeout=5.0)
                 if response.status_code == 200:
@@ -230,7 +231,7 @@ async def get_whisper_models(
             headers["Authorization"] = f"Bearer {effective_key}"
 
         # First try to fetch models from the endpoint
-        async with httpx.AsyncClient(headers=headers) as client:
+        async with build_guarded_http_client(headers=headers) as client:
             try:
                 url = build_whisper_v1_url(endpoint, "models")
                 response = await client.get(url, timeout=5.0)

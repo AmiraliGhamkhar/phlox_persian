@@ -33,6 +33,9 @@ async def search_wikipedia(query: str, max_results: int = 3) -> list[dict]:
         List of article dictionaries with title, extract, url
     """
     query = sanitize_query_for_external_search(query)
+    if not query:
+        # The query was entirely PHI — do not send anything outbound (LLM02).
+        return []
 
     # Wikipedia API requires a User-Agent header
     headers = {

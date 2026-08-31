@@ -127,7 +127,11 @@ def sanitize_query_for_external_search(
             len(sanitized),
         )
 
-    return sanitized.strip() or query  # Return original if sanitization empties it
+    # Fail closed: if the only content of the query was PHI, return an empty
+    # string so callers skip the outbound request entirely. Returning the
+    # original would send exactly the identifier we were asked to scrub
+    # (LLM02:2026).
+    return sanitized.strip()
 
 
 def sanitize_pubmed_query(query: str) -> str:

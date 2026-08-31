@@ -35,3 +35,25 @@ def normalize_request_id(incoming: str | None) -> str | None:
     if value and _VALID_REQUEST_ID.match(value):
         return value
     return None
+
+
+# --- Authenticated actor ---------------------------------------------------
+# Set from request.state.user when PROXY_AUTH_ENABLED (desktop: "local").
+# Pending-agent actions capture it so a confirm request from another user is
+# rejected (API1:2023) instead of running an action someone else queued.
+_actor: ContextVar[str | None] = ContextVar("request_actor", default=None)
+
+
+def get_request_actor() -> str | None:
+    """Return the authenticated proxy user for the current request, if any."""
+    return _actor.get()
+
+
+def set_request_actor(value: str | None) -> Token[str | None]:
+    """Bind the actor for the current task; caller resets with the token."""
+    return _actor.set(value or None)
+
+
+def reset_request_actor(token: Token[str | None]) -> None:
+    """Restore the previous actor value."""
+    _actor.reset(token)

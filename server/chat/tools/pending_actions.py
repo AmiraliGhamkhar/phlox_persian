@@ -40,6 +40,9 @@ class PendingAction:
     conversation_history: list = field(default_factory=list)
     raw_transcription: str | None = None
     patient_context: dict[str, Any] | None = None
+    # AuthN identity that queued the action; confirm/cancel require a match
+    # (API1:2023 object-level authz). None = pre-auth desktop/local.
+    actor: str | None = None
     created_at: float = field(default_factory=time.time)
 
 
@@ -76,6 +79,7 @@ def register_pending_action(
     conversation_history: list | None = None,
     raw_transcription: str | None = None,
     patient_context: dict[str, Any] | None = None,
+    actor: str | None = None,
 ) -> PendingAction:
     """Store a tool call awaiting approval and return it."""
     _prune_expired()
@@ -92,6 +96,7 @@ def register_pending_action(
         conversation_history=conversation_history or [],
         raw_transcription=raw_transcription,
         patient_context=dict(patient_context) if isinstance(patient_context, dict) else None,
+        actor=actor,
     )
     if len(_pending) >= MAX_PENDING_ACTIONS:
         # Drop the oldest action to bound memory.

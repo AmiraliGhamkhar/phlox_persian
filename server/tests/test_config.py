@@ -68,12 +68,35 @@ def test_update_prompts():
 
 
 def test_update_config():
-    new_config = {"TEST_CONFIG": "test_value"}
+    new_config = {"DAILY_SUMMARY": "test_value"}
     response = client.post("/api/config/global", json=new_config)
     assert response.status_code == 200
     data = response.json()
     message = data.get("message", "")
     assert "message" in data and ("success" in message.lower())
+
+
+def test_update_config_rejects_unknown_keys():
+    """Mass-assignment guard: arbitrary config keys must be rejected."""
+    response = client.post("/api/config/global", json={"TEST_CONFIG": "test_value"})
+    assert response.status_code == 400
+    assert "Unknown configuration keys" in response.json()["detail"]
+
+
+def test_update_config_rejects_metadata_url():
+    """URL fields must pass the SSRF guard before being stored."""
+    response = client.post(
+        "/api/config/global",
+        json={"LLM_BASE_URL": "http://169.254.169.254/latest/meta-data"},
+    )
+    assert response.status_code == 400
+    assert "LLM_BASE_URL" in response.json()["detail"]
+
+
+def test_update_config_rejects_bad_language():
+    response = client.post("/api/config/global", json={"ASR_LANGUAGE": "de"})
+    assert response.status_code == 400
+    assert "ASR_LANGUAGE" in response.json()["detail"]
 
 
 def test_update_options():

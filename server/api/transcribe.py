@@ -72,11 +72,20 @@ class ExtractDemographicsVisualRequest(BaseModel):
     pages: list[VisualDocumentPage]
 
 
-def _authorize_live_socket(websocket: WebSocket) -> bool:
-    """Accept either a Bearer header or ``?token=`` for the live WebSocket.
+# WebSocket handshake subprotocol for live transcription. The request token is
+# carried as a second offered subprotocol so it never appears in the request
+# URL/query string (query strings are written to uvicorn access logs and, via
+# the desktop process manager, to the on-disk app log — A09:2025).
+LIVE_WS_SUBPROTOCOL = "phlox-live"
 
-    Browsers cannot set Authorization on the WebSocket handshake, so the
-    desktop client passes the local request token as a query parameter.
+
+def _authorize_live_socket(websocket: WebSocket) -> bool:
+    """Accept a Bearer header or ``Sec-WebSocket-Protocol`` subprotocol.
+
+    Browsers cannot set an Authorization header on the WebSocket handshake,
+    so the desktop client offers ``phlox-live,<token>`` as subprotocols; the
+    token is compared with constant-time equality and is never placed in the
+    URL or query string.
     """
     from server.constants import is_docker_runtime
     from server.utils.local_request_token import get_request_token
@@ -87,12 +96,18 @@ def _authorize_live_socket(websocket: WebSocket) -> bool:
     if not expected:
         return False
     header = websocket.headers.get("authorization") or ""
-    provided = ""
     if header.lower().startswith("bearer "):
-        provided = header[7:]
-    if not provided:
-        provided = websocket.query_params.get("token") or ""
-    return bool(provided) and secrets.compare_digest(provided, expected)
+        return secrets.compare_digest(header[7:].strip(), expected)
+
+    offered = websocket.headers.get("sec-websocket-protocol") or ""
+    protocols = [p.strip() for p in offered.split(",") if p.strip()]
+    if LIVE_WS_SUBPROTOCOL not in protocols:
+        return False
+    return any(
+        secrets.compare_digest(protocol, expected)
+        for protocol in protocols
+        if protocol != LIVE_WS_SUBPROTOCOL
+    )
 
 
 @router.websocket("/live")
@@ -108,7 +123,15 @@ async def live_transcribe(websocket: WebSocket):
     if not _authorize_live_socket(websocket):
         await websocket.close(code=4401)
         return
-    await websocket.accept()
+    # Echo the app subprotocol (never the token) so the client can confirm the
+    # negotiated connection.
+    offered = websocket.headers.get("sec-websocket-protocol") or ""
+    subprotocol = (
+        LIVE_WS_SUBPROTOCOL
+        if LIVE_WS_SUBPROTOCOL in [p.strip() for p in offered.split(",") if p.strip()]
+        else None
+    )
+    await websocket.accept(subprotocol=subprotocol)
 
     from server.database.config.manager import config_manager
     from server.transcription.live import create_live_session, live_is_authoritative

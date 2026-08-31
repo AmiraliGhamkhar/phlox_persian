@@ -341,14 +341,24 @@ class LocalTokenMiddleware(BaseHTTPMiddleware):
             )
 
         # Verify Authorization header. Browser WebSocket clients cannot set
-        # custom headers, so the live transcription handshake may pass the
-        # token as ``?token=`` instead.
+        # custom headers, so the live transcription handshake carries the
+        # token as a second ``Sec-WebSocket-Protocol`` subprotocol instead of
+        # a query parameter. Query strings get written verbatim to uvicorn
+        # access logs (and the desktop app log on disk), so a ``?token=``
+        # handshake would persist the credential in log files (A09:2025).
+        # The legacy ``?token=`` path is intentionally NOT accepted anymore.
         auth_header = request.headers.get("Authorization", "")
         provided_token = ""
         if auth_header.startswith("Bearer "):
             provided_token = auth_header[7:]  # remove "Bearer " prefix
         elif path.startswith("/api/transcribe/live"):
-            provided_token = request.query_params.get("token") or ""
+            offered = request.headers.get("Sec-WebSocket-Protocol", "") or ""
+            protocols = [p.strip() for p in offered.split(",") if p.strip()]
+            if "phlox-live" in protocols:
+                for protocol in protocols:
+                    if protocol != "phlox-live" and protocol:
+                        provided_token = protocol
+                        break
 
         if not provided_token:
             logger.debug(f"Missing Bearer header for {path}")
@@ -410,9 +420,21 @@ class ProxyAuthMiddleware(BaseHTTPMiddleware):
             logger.warning(f"Access denied for user: {user}")
             return JSONResponse(status_code=403, content={"detail": "Access denied"})
 
-        # Store user for downstream use
+        # Store user for downstream use and bind it to the request context so
+        # background tasks (pending-action confirmations, patient access)
+        # can enforce object-level authorization (API1:2023).
         request.state.user = user
-        return await call_next(request)
+        from server.utils.request_context import (
+            reset_request_actor,
+            set_request_actor,
+        )
+
+        actor_token = set_request_actor(user)
+        try:
+            response = await call_next(request)
+        finally:
+            reset_request_actor(actor_token)
+        return response
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

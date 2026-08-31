@@ -166,8 +166,11 @@ export const transcriptionApi = {
         const wsBase = baseUrl
             ? baseUrl.replace(/^http/i, "ws")
             : `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}`;
-        const query = token ? `?token=${encodeURIComponent(token)}` : "";
-        const socket = new WebSocket(`${wsBase}/api/transcribe/live${query}`);
+        // Auth token travels in a WebSocket subprotocol, never in the URL:
+        // query strings are written to uvicorn access logs and to the desktop
+        // app log on disk (A09:2025).
+        const subprotocols = token ? ["phlox-live", token] : ["phlox-live"];
+        const socket = new WebSocket(`${wsBase}/api/transcribe/live`, subprotocols);
 
         let lastText = "";
         let authoritative = false;
@@ -178,6 +181,21 @@ export const transcriptionApi = {
         const result = () => ({ text: lastText, authoritative });
 
         socket.binaryType = "arraybuffer";
+
+        socket.onopen = () => {
+            // Fail closed: an authenticated session must be confirmed by the
+            // server via the negotiated subprotocol (token must not echo).
+            if (token && socket.protocol !== "phlox-live") {
+                onError?.("Live transcription authentication failed");
+                try {
+                    socket.close();
+                } catch {
+                    // already closed
+                }
+                return;
+            }
+            opened = true;
+        };
 
         socket.onmessage = (event) => {
             if (typeof event.data !== "string") return;

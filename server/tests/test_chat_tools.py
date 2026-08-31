@@ -126,10 +126,13 @@ def test_mcp_tool_requires_confirmation_from_annotations():
     read_only = SimpleNamespace(annotations={"readOnlyHint": True})
     writable = SimpleNamespace(annotations={"readOnlyHint": False})
     plain = SimpleNamespace(annotations=None)
+    no_hint = SimpleNamespace(annotations={})
     assert mcp_tool_requires_confirmation(destructive) is True
     assert mcp_tool_requires_confirmation(read_only) is False
     assert mcp_tool_requires_confirmation(writable) is True
-    assert mcp_tool_requires_confirmation(plain) is False
+    # Fail closed: unknown/absent annotations must NOT run without approval.
+    assert mcp_tool_requires_confirmation(plain) is True
+    assert mcp_tool_requires_confirmation(no_hint) is True
 
 
 def test_requires_user_approval_builtin():

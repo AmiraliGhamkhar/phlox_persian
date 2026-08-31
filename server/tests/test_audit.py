@@ -80,6 +80,11 @@ def test_purge_old_events_honors_retention():
 
 
 def test_purge_keeps_recent_events():
+    # Idempotent across runs: the shared test DB may already hold rows from a
+    # previous invocation, so clear this test's marker first.
+    with get_db().transaction() as cursor:
+        cursor.execute("DELETE FROM audit_log WHERE path = '/api/recent'")
+
     log_event(method="GET", path="/api/recent", status=200)
     purge_old_events()
     with get_db().read() as cursor:

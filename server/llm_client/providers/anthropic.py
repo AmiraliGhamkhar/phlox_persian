@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from server.utils.ssrf import build_guarded_http_client
+
 from server.utils.http_retry import (
     ProviderHTTPError,
     sanitize_provider_error,
@@ -286,7 +288,7 @@ async def anthropic_chat(
             tool_blocks: dict[int, dict[str, str]] = {}
             try:
                 async with (
-                    httpx.AsyncClient(timeout=timeout) as client,
+                    build_guarded_http_client(timeout=timeout) as client,
                     client.stream("POST", url, json=payload, headers=headers) as response,
                 ):
                     _raise_for_status(response)
@@ -358,7 +360,7 @@ async def anthropic_chat(
         return response_generator()
 
     async def _post() -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with build_guarded_http_client(timeout=timeout) as client:
             response = await client.post(url, json=payload, headers=headers)
             _raise_for_status(response)
             return _message_to_ollama(model, response.json())

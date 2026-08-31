@@ -69,6 +69,10 @@ ENV DOCKER_CONTAINER=true \
     PYTHONPATH=/usr/src/app \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    # Must stay 0.0.0.0: docker-proxy connects to the container's bridge IP,
+    # so a loopback bind inside the container would break published ports.
+    # Exposure is controlled by the compose port mapping (loopback by
+    # default) and the startup guard in server/server.py.
     SERVER_HOST=0.0.0.0 \
     PORT=5000 \
     UV_PYTHON_PREFERENCE=only-system \

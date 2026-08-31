@@ -76,13 +76,21 @@ class AsyncLLMClient:
         self._client = None
         if self.protocol != "anthropic":
             try:
+                import httpx
+
                 from openai import AsyncOpenAI
 
+                from server.utils.ssrf import build_guarded_http_client
+
+                # Guarded transport: DNS is resolved once, validated, and the
+                # connection is pinned to that IP (Host/SNI preserved), so a
+                # rebinding hostname cannot bypass the SSRF guard.
                 self._client = AsyncOpenAI(
                     api_key=self.api_key,
                     base_url=f"{self.base_url}/v1",
                     timeout=timeout,
                     max_retries=2,
+                    http_client=build_guarded_http_client(timeout=httpx.Timeout(timeout)),
                 )
             except ImportError as error:
                 raise ImportError(

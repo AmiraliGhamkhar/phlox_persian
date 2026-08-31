@@ -42,27 +42,74 @@ def _get_refresh_lock() -> asyncio.Lock:
     return _refresh_lock
 
 
+def _guarded_httpx_client_factory():
+    """httpx factory for MCP: pins every request to a validated resolved IP.
+
+    The MCP SDK builds its own httpx clients; injecting a guarded client here
+    closes the DNS-rebinding window between ``validate_fetch_url`` and the
+    actual connection, and disables redirects the SDK enables by default.
+    ``auth`` is forwarded to the client (httpx applies it per request).
+    """
+
+    def factory(headers=None, timeout=None, auth=None):
+        import httpx
+
+        from server.utils.ssrf import build_guarded_http_client
+
+        kwargs: dict = {}
+        if headers is not None:
+            kwargs["headers"] = headers
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        if auth is not None:
+            kwargs["auth"] = auth
+        return build_guarded_http_client(**kwargs)
+
+    return factory
+
+
 async def _enter_transport(stack: AsyncExitStack, url: str, transport_name: str):
     """Open a read/write MCP transport and enter it on ``stack``."""
+    factory = _guarded_httpx_client_factory()
     if transport_name == STREAMABLE_HTTP:
         from mcp.client.streamable_http import streamablehttp_client
 
         try:
             transport = await stack.enter_async_context(
-                streamablehttp_client(url, timeout=_CONNECT_TIMEOUT_SECONDS)
+                streamablehttp_client(
+                    url,
+                    timeout=_CONNECT_TIMEOUT_SECONDS,
+                    httpx_client_factory=factory,
+                )
             )
         except TypeError:
-            transport = await stack.enter_async_context(streamablehttp_client(url))
+            transport = await stack.enter_async_context(
+                streamablehttp_client(
+                    url,
+                    timeout=_CONNECT_TIMEOUT_SECONDS,
+                    httpx_client_factory=factory,
+                )
+            )
         return transport[0], transport[1]
 
     from mcp.client.sse import sse_client
 
     try:
         transport = await stack.enter_async_context(
-            sse_client(url, timeout=_CONNECT_TIMEOUT_SECONDS)
+            sse_client(
+                url,
+                timeout=_CONNECT_TIMEOUT_SECONDS,
+                httpx_client_factory=factory,
+            )
         )
     except TypeError:
-        transport = await stack.enter_async_context(sse_client(url))
+        transport = await stack.enter_async_context(
+            sse_client(
+                url,
+                timeout=_CONNECT_TIMEOUT_SECONDS,
+                httpx_client_factory=factory,
+            )
+        )
     return transport[0], transport[1]
 
 

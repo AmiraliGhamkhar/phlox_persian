@@ -27,13 +27,24 @@ def _annotation_flag(annotations: Any, name: str) -> Any:
 
 
 def mcp_tool_requires_confirmation(tool: Any) -> bool:
-    """True when MCP annotations mark the tool as destructive / not read-only."""
+    """True when the tool may not be implicitly read-only.
+
+    Fail closed: most MCP servers ship no annotations at all, so the tool's
+    effect is unknown. An unknown tool must not run without the user's
+    explicit approval (LLM01/independent-of-frameworks: an LLM calling an
+    unclassified MCP tool is an under-specified authorization boundary). Only
+    an explicit ``readOnlyHint: true`` allows the tool to run directly.
+    """
     annotations = getattr(tool, "annotations", None)
     if annotations is None:
-        return False
+        return True
     if _annotation_flag(annotations, "destructiveHint") is True:
         return True
-    return _annotation_flag(annotations, "readOnlyHint") is False
+    read_only = _annotation_flag(annotations, "readOnlyHint")
+    if read_only is True:
+        return False
+    # readOnlyHint absent or non-boolean: unknown -> require confirmation.
+    return True
 
 
 def mcp_transport_order(url: str) -> list[str]:

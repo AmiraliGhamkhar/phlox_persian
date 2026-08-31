@@ -4,7 +4,7 @@ import logging
 import httpx
 from fastapi import APIRouter, HTTPException, Query
 
-from server.utils.ssrf import validate_fetch_url
+from server.utils.ssrf import build_guarded_http_client, validate_fetch_url
 from server.utils.url_utils import build_openai_v1_url, build_whisper_v1_url
 
 router = APIRouter()
@@ -59,7 +59,7 @@ async def validate_url(
 
         # follow_redirects stays False (httpx default) so a validated host
         # cannot bounce the request somewhere else.
-        async with httpx.AsyncClient(follow_redirects=False) as client:
+        async with build_guarded_http_client() as client:
             if validation_type == "whisper":
                 # For Whisper, try to access the audio/transcriptions endpoint with a minimal request.
                 # Accept endpoints with or without a terminal /v1 segment.

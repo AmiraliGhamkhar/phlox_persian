@@ -1,6 +1,6 @@
+import asyncio
 import logging
 
-import httpx
 from fastapi import APIRouter
 
 from server.utils.providers import (
@@ -8,6 +8,7 @@ from server.utils.providers import (
     resolve_embedding_connection,
     resolve_llm_connection,
 )
+from server.utils.ssrf import build_guarded_http_client, resolve_validated_target
 from server.utils.url_utils import build_openai_v1_url, build_whisper_v1_url
 
 router = APIRouter()
@@ -68,6 +69,25 @@ def _get_embedding_status_url(config: dict) -> str | None:
     return None
 
 
+async def _target_is_local_loopback(url: str) -> bool:
+    """True when ``url`` resolves only to loopback/private addresses.
+
+    Used to decide whether a stored API key may be forwarded: credentials
+    must never be sent to the machine itself / the LAN (A01:2025).
+    """
+    import ipaddress
+
+    try:
+        target = await asyncio.to_thread(resolve_validated_target, url)
+    except Exception:
+        return False  # unreachable/blocked -> the guarded client will fail anyway
+    for ip in target.ips:
+        parsed = ipaddress.ip_address(ip)
+        if not (parsed.is_loopback or parsed.is_private):
+            return False
+    return True
+
+
 @router.get("/status")
 async def get_server_status():
     """Check the status of LLM, Whisper, and embedding servers."""
@@ -83,18 +103,25 @@ async def get_server_status():
         if llm_url:
             headers = {}
             connection = resolve_llm_connection(config)
-            if connection["provider"] == "anthropic":
-                headers = {
-                    "x-api-key": connection["api_key"],
-                    "anthropic-version": "2023-06-01",
-                }
-            elif connection["api_key"] and connection["api_key"] not in {
-                "not-needed",
-                "ollama",
-                "lm-studio",
-            }:
-                headers = {"Authorization": f"Bearer {connection['api_key']}"}
-            async with httpx.AsyncClient() as client:
+            # Key-forward policy (A01:2025): never forward the stored API key
+            # to a local/private endpoint — no local model server needs it, a
+            # local listener never needs credentials, and sending it would
+            # leak the provider secret to whatever process is bound there.
+            # The guarded client additionally blocks metadata/foreign-IP
+            # targets before the request goes out.
+            if not await _target_is_local_loopback(llm_url):
+                if connection["provider"] == "anthropic":
+                    headers = {
+                        "x-api-key": connection["api_key"],
+                        "anthropic-version": "2023-06-01",
+                    }
+                elif connection["api_key"] and connection["api_key"] not in {
+                    "not-needed",
+                    "ollama",
+                    "lm-studio",
+                }:
+                    headers = {"Authorization": f"Bearer {connection['api_key']}"}
+            async with build_guarded_http_client() as client:
                 try:
                     response = await client.get(llm_url, timeout=2.0, headers=headers)
                     status["llm"] = response.status_code in [200, 401, 403]
@@ -113,7 +140,7 @@ async def get_server_status():
 
             status["whisper"] = asr_model_manager.get_model_path(asr["model"]) is not None
         elif whisper_url:
-            async with httpx.AsyncClient() as client:
+            async with build_guarded_http_client() as client:
                 try:
                     response = await client.get(whisper_url, timeout=2.0)
                     status["whisper"] = response.status_code in [200, 401, 403]
@@ -122,7 +149,7 @@ async def get_server_status():
 
         embedding_url = _get_embedding_status_url(config)
         if embedding_url:
-            async with httpx.AsyncClient() as client:
+            async with build_guarded_http_client() as client:
                 try:
                     response = await client.get(embedding_url, timeout=2.0)
                     status["embedding"] = response.status_code in [200, 401, 403]

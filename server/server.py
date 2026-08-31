@@ -366,9 +366,57 @@ def start_server_for_desktop():
         loop="asyncio",
         workers=0,
         http="httptools",
+        # Access logs are the only place the full request URL (including any
+        # query string) is written, and the desktop shell pipes server stdout
+        # into the on-disk app log. The AuditMiddleware already records every
+        # API request with method/status/duration/IP, so disable access logs
+        # to keep secrets (e.g. handshake auth) out of log files (A09:2025).
+        access_log=False,
     )
     server = uvicorn.Server(config)
     server.run()
+
+
+def _enforce_docker_network_policy(host: str, *, exposed: bool) -> None:
+    """Fail fast when a Docker deployment exposes the API without auth.
+
+    The API has no authentication of its own in Docker (LocalTokenMiddleware
+    is skipped); the only auth option is the reverse-proxy header. Publishing
+    the API beyond loopback while ``PROXY_AUTH_ENABLED`` is off would expose
+    every /api route — including patient data and provider keys — without
+    credentials. The compose stack declares that intent explicitly via
+    ``PHLOX_EXPOSE_PUBLIC=1`` because a container must bind 0.0.0.0 even for
+    a loopback-only publish (docker-proxy connects to the bridge IP).
+    """
+    if IS_TESTING:
+        return
+    loopback = {"127.0.0.1", "localhost", "::1", "[::1]"}
+    if not exposed:
+        # Loopback-only publish (the compose default): allowed with or
+        # without proxy auth; warn when a public-facing proxy setup is
+        # half-configured so the operator notices.
+        if PROXY_AUTH_ENABLED and not PROXY_AUTH_ALLOWED_USERS:
+            logger.warning(
+                "PROXY_AUTH_ENABLED=true but PROXY_AUTH_ALLOWED_USERS is empty: "
+                "every authenticated proxy user is treated as the same single "
+                "clinic account."
+            )
+        return
+
+    # Explicit intent to be reachable from other hosts (host networking or a
+    # non-loopback port mapping): authentication is mandatory.
+    if host.strip().lower() not in loopback and not PROXY_AUTH_ENABLED:
+        raise RuntimeError(
+            "Refusing to start: PHLOX_EXPOSE_PUBLIC=1 (non-loopback API) requires "
+            "PROXY_AUTH_ENABLED=true. Set PROXY_AUTH_ENABLED=true and "
+            "PROXY_AUTH_ALLOWED_USERS, or keep the loopback-only publish."
+        )
+    if PROXY_AUTH_ENABLED and not PROXY_AUTH_ALLOWED_USERS:
+        logger.warning(
+            "Exposed deployment with PROXY_AUTH_ENABLED=true but no "
+            "PROXY_AUTH_ALLOWED_USERS: every authenticated proxy user is treated as "
+            "the same single clinic account."
+        )
 
 
 if __name__ == "__main__":
@@ -377,9 +425,14 @@ if __name__ == "__main__":
         start_server_for_desktop()
     else:
         # Docker mode
+        docker_host = os.getenv("SERVER_HOST", "0.0.0.0")
+        _enforce_docker_network_policy(
+            docker_host,
+            exposed=os.getenv("PHLOX_EXPOSE_PUBLIC") == "1",
+        )
         config = uvicorn.Config(
             app,
-            host=os.getenv("SERVER_HOST", "0.0.0.0"),  # nosec B104
+            host=docker_host,
             port=int(os.getenv("PORT", 5000)),
             timeout_keep_alive=300,
             timeout_graceful_shutdown=10,
@@ -388,6 +441,10 @@ if __name__ == "__main__":
             http="httptools",
             ws_ping_interval=None,
             ws_ping_timeout=None,
+            # Same secret-in-logs rationale as desktop: uvicorn access logs
+            # include query strings, and the audit middleware already records
+            # the API traffic that matters.
+            access_log=False,
         )
         server = uvicorn.Server(config)
         server.run()

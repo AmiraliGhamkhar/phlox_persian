@@ -162,6 +162,7 @@ async def confirm_pending_action(payload: PendingActionDecision):
     from server.chat.tools.accumulator import ToolResultAccumulator
     from server.chat.tools.executor import execute_tool_streaming
     from server.chat.tools.pending_actions import pop_pending_action
+    from server.utils.request_context import get_request_actor
 
     action = pop_pending_action(payload.action_id)
     if action is None:
@@ -169,6 +170,16 @@ async def confirm_pending_action(payload: PendingActionDecision):
             status_code=404,
             detail="Pending action not found (it may have expired or already been handled)",
         )
+
+    # Object-level authorization (API1:2023): only the identity that queued the
+    # action may confirm it. Without this, any authenticated proxy user could
+    # approve a record write another user (or another session) queued.
+    if action.actor is not None and get_request_actor() != action.actor:
+        logging.warning(
+            f"Pending action confirm rejected: actor mismatch "
+            f"({get_request_actor()!r} vs {action.actor!r})"
+        )
+        raise HTTPException(status_code=403, detail="This action belongs to another user")
 
     # Mark as approved so the executor's gate lets it through exactly once.
     action.tool_call["_approved"] = True
@@ -217,10 +228,17 @@ async def confirm_pending_action(payload: PendingActionDecision):
 async def cancel_pending_action(payload: PendingActionDecision):
     """Discard a pending tool action without executing it."""
     from server.chat.tools.pending_actions import pop_pending_action
+    from server.utils.request_context import get_request_actor
 
     action = pop_pending_action(payload.action_id)
     if action is None:
         raise HTTPException(status_code=404, detail="Pending action not found")
+    if action.actor is not None and get_request_actor() != action.actor:
+        logging.warning(
+            f"Pending action cancel rejected: actor mismatch "
+            f"({get_request_actor()!r} vs {action.actor!r})"
+        )
+        raise HTTPException(status_code=403, detail="This action belongs to another user")
     logging.info(f"Pending action cancelled: {action.tool_name} ({action.id})")
     return {"cancelled": True, "tool": action.tool_name}
 
