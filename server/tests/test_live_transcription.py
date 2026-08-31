@@ -120,6 +120,35 @@ async def test_speechmatics_session_builds_config_not_auto(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_speechmatics_live_rejects_melia1_batch_only():
+    """Melia 1 is not in the Realtime SDK Model enum; live must fail clearly."""
+    import types
+
+    async def emit(_event):
+        return None
+
+    fake_rt = types.ModuleType("speechmatics.rt")
+    fake_rt.AsyncClient = object
+    fake_rt.AudioEncoding = type("AudioEncoding", (), {"PCM_S16LE": "pcm_s16le"})
+    fake_rt.AudioFormat = object
+    fake_rt.Model = type("Model", (), {"STANDARD": "standard", "ENHANCED": "enhanced"})
+    fake_rt.ServerMessageType = object
+    fake_rt.TranscriptionConfig = object
+    fake_rt.TranscriptResult = object
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setitem(__import__("sys").modules, "speechmatics.rt", fake_rt)
+    try:
+        session = SpeechmaticsLiveSession(
+            {"ASR_PROVIDER": "speechmatics", "ASR_KEY": "k", "ASR_MODEL": "melia-1"},
+            emit,
+        )
+        with pytest.raises(ValueError, match="Batch-only"):
+            await session.start()
+    finally:
+        monkeypatch.undo()
+
+
+@pytest.mark.asyncio
 async def test_fireworks_segments_are_parsed():
     """Fireworks streams `segments` deltas; the adapter must forward them."""
     events = []

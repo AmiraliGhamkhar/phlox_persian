@@ -47,6 +47,32 @@ def _get_whisper_port() -> str:
     return str(get_whisper_port())
 
 
+def _validate_local_model_language(model_id: str, language: str) -> None:
+    """Reject language/model combinations the local engines cannot do.
+
+    The local catalog only ships three engines:
+    - Whisper large-v3-turbo: multilingual — fa, en, and mixed (``auto``).
+    - Parakeet TDT 0.6B v3: **not** a Persian model (25 European languages).
+    - Shenava Koochik: **Persian-only**.
+
+    Running Persian/auto through Parakeet or English through Shenava silently
+    produces garbage text, so fail with an actionable message instead.
+    """
+    if not model_id or not model_id.startswith(("shenava-", "parakeet-")):
+        return
+    if model_id.startswith("parakeet-") and language in {"fa", "auto"}:
+        raise ValueError(
+            "Parakeet is an English/European-language model and cannot transcribe "
+            "Persian or mixed Persian/English speech. Select a Whisper large-v3-turbo "
+            "model, Shenava (Persian only), or an online provider for this language."
+        )
+    if model_id.startswith("shenava-") and language == "en":
+        raise ValueError(
+            "Shenava is a Persian-only model and cannot transcribe English. "
+            "Select a Whisper large-v3-turbo model or an online provider for English."
+        )
+
+
 async def transcribe_audio(audio_buffer: bytes) -> dict[str, Union[str, float]]:
     """
     Transcribe an audio buffer using an OpenAI-compatible ASR endpoint.
@@ -75,6 +101,7 @@ async def transcribe_audio(audio_buffer: bytes) -> dict[str, Union[str, float]]:
                     model_id = asr_model_manager.get_selected_model_id() or ""
                 except Exception:
                     model_id = ""
+            _validate_local_model_language(model_id, resolve_asr_language(config))
             if model_id.startswith("shenava-"):
                 logger.info("Using local Shenava ASR for transcription")
                 return await _transcribe_local_shenava(audio_buffer, config)
@@ -265,6 +292,13 @@ async def _transcribe_speechmatics(
     model = str(config.get("ASR_MODEL") or "enhanced").strip().lower()
     if model not in {"standard", "enhanced", "melia-1"}:
         model = "enhanced"
+    # Melia 1 is multilingual and switches languages automatically, but it does
+    # NOT support ``language``/``auto`` in the lang-identification sense: it
+    # accepts an ISO hint only. Also it is Batch-only (not available on the
+    # Realtime WebSocket SDK used for live transcription).
+    if model == "melia-1" and language == "auto":
+        language = "fa"
+        logger.info("Melia 1 does not support language identification; using Persian hint 'fa'")
     job_config: dict[str, object] = {
         "type": "transcription",
         "transcription_config": {
@@ -607,14 +641,19 @@ async def _transcribe_fireworks(audio_buffer: bytes, config: dict) -> dict[str, 
         raise ValueError("A Fireworks API key is required for the selected ASR provider")
 
     language = resolve_asr_language(config)
+    if language == "auto":
+        # Fireworks' documented language list has no ``auto``; omitting the
+        # field can fall back to the provider default (English), which would
+        # mangle Persian. This app is Persian-first, so pin ``fa`` and keep
+        # true mixed fa/en detection to Speechmatics Batch or local Whisper.
+        language = "fa"
     data = {
         "model": model,
         "temperature": "0.0",
         "response_format": "verbose_json",
         "task": "transcribe",
+        "language": language,
     }
-    if language != "auto":
-        data["language"] = language
 
     headers = {"Authorization": f"Bearer {api_key}"}
     base_url = _fireworks_batch_url(config).rstrip("/")

@@ -127,6 +127,12 @@ class SpeechmaticsLiveSession(LiveSession):
         # Map the configured operating point onto the v1 ``Model`` enum; any
         # unrecognised value falls back to the default ``enhanced`` model.
         model_name = str(self.config.get("ASR_MODEL") or "enhanced").strip().lower()
+        if model_name == "melia-1":
+            raise ValueError(
+                "Melia 1 is a Batch-only model and is not available for live "
+                "(Realtime) transcription. Use 'enhanced' or 'standard' for live, "
+                "or upload the recording and let the Batch path handle it."
+            )
         model = Model.STANDARD if model_name == "standard" else Model.ENHANCED
 
         client = AsyncClient(api_key=api_key, url=speechmatics_rt_url(self.config))
