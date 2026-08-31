@@ -20,6 +20,7 @@ from server.utils.url_utils import normalize_openai_base_url
 
 from .providers.anthropic import anthropic_chat
 from .providers.openai import openai_compatible_chat
+from .providers.responses import openai_responses_chat
 from .utils import repair_json
 
 logger = logging.getLogger(__name__)
@@ -157,6 +158,13 @@ class AsyncLLMClient:
                     tools,
                     stream,
                     self.timeout,
+                )
+            elif self.provider_type == "openai" and not stream:
+                # OpenAI recommends Responses for new integrations. Keep the
+                # Chat Completions path for streaming because the existing
+                # stream consumer expects delta-shaped chunks.
+                result = await openai_responses_chat(
+                    self._client, model, messages, format, options, tools
                 )
             else:
                 result = await openai_compatible_chat(

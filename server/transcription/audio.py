@@ -554,13 +554,22 @@ async def _transcribe_fireworks(audio_buffer: bytes, config: dict) -> dict[str, 
 async def _transcribe_external_api(
     audio_buffer: bytes, config: dict
 ) -> dict[str, Union[str, float]]:
-    """Transcribe using an external OpenAI-compatible ASR API."""
+    """Transcribe using an external OpenAI-compatible ASR API.
+
+    Always use the resolved connection here.  This matters for named providers
+    such as OpenAI: their default URL must be used when the UI leaves the base
+    URL blank, and a user-supplied URL may already include ``/v1``.
+    """
+    from server.utils.providers import resolve_asr_connection
+    from server.utils.url_utils import build_whisper_v1_url
+
+    connection = resolve_asr_connection(config)
     filename, content_type = _detect_audio_format(audio_buffer)
     async with httpx.AsyncClient(timeout=httpx.Timeout(600.0)) as client:
         files = {"file": (filename, audio_buffer, content_type)}
         language = resolve_asr_language(config)
         data = {
-            "model": config.get("ASR_MODEL") or config.get("WHISPER_MODEL", "whisper-1"),
+            "model": connection.get("model") or "whisper-1",
             "temperature": "0.1",
             "vad_filter": "true",
             "task": "transcribe",
@@ -575,22 +584,18 @@ async def _transcribe_external_api(
         transcription_start = time.perf_counter()
 
         headers = {}
-        whisper_key = (config.get("ASR_KEY") or config.get("WHISPER_KEY") or "").strip()
-        if whisper_key:
+        whisper_key = str(connection.get("api_key") or "").strip()
+        if whisper_key and whisper_key not in {"not-needed", "ollama", "lm-studio"}:
             headers["Authorization"] = f"Bearer {whisper_key}"
 
         try:
-            whisper_base_url = (
-                (config.get("ASR_BASE_URL") or config.get("WHISPER_BASE_URL") or "")
-                .strip()
-                .rstrip("/")
-            )
-            if whisper_base_url.lower().endswith("/v1"):
-                whisper_base_url = whisper_base_url[:-3]
+            whisper_base_url = str(connection.get("base_url") or "").strip()
+            if not whisper_base_url:
+                raise ValueError("An ASR base URL is required for the selected provider")
 
             response = await _post_audio(
                 client,
-                f"{whisper_base_url}/v1/audio/transcriptions",
+                build_whisper_v1_url(whisper_base_url, "audio/transcriptions"),
                 data=data,
                 files=files,
                 headers=headers,
