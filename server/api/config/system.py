@@ -104,8 +104,10 @@ async def get_server_status():
         whisper_url = _get_whisper_status_url(config)
         asr = resolve_asr_connection(config)
         if asr["provider"] in {"speechmatics", "fireworks"}:
-            # Cloud providers are "up" when a key is configured.
-            status["whisper"] = bool(asr["api_key"])
+            # Cloud providers are "up" when a key is configured. Speechmatics
+            # keys are product-scoped, so also accept the Batch key.
+            batch_key = config.get("ASR_BATCH_KEY") or config.get("WHISPER_BATCH_KEY")
+            status["whisper"] = bool(asr["api_key"] or batch_key)
         elif asr["provider"] == "local" and str(asr["model"]).startswith(("shenava-", "parakeet-")):
             from server.utils.whisper_models import asr_model_manager
 

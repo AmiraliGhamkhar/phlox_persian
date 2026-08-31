@@ -24,6 +24,7 @@ export const ASR_PROVIDER_DEFAULTS = {
   whispercpp: { url: "http://127.0.0.1:2022", models: ["whisper-1"], requiresKey: false },
   speechmatics: {
     url: "wss://global.rt.speechmatics.com/v2",
+    batchUrl: "https://eu1.asr.api.speechmatics.com/v2",
     models: ["enhanced", "standard"],
     requiresKey: true,
   },
@@ -73,6 +74,9 @@ export const applyAsrProviderDefaults = (providerId, handleConfigChange) => {
   handleConfigChange("ASR_PROVIDER", providerId);
   handleConfigChange("ASR_BASE_URL", defaults.url);
   handleConfigChange("WHISPER_BASE_URL", defaults.url);
+  if (defaults.batchUrl) {
+    handleConfigChange("ASR_BATCH_URL", defaults.batchUrl);
+  }
   const model = defaults.models[0] || "";
   handleConfigChange("ASR_MODEL", model);
   handleConfigChange("WHISPER_MODEL", model);

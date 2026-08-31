@@ -21,6 +21,9 @@ class Config(BaseModel):
         ASR_BASE_URL (str): Canonical base URL for the ASR endpoint.
         ASR_MODEL (str): Canonical ASR model identifier.
         ASR_KEY (str): Canonical API key for the ASR endpoint.
+        ASR_BATCH_URL (str): Speechmatics Batch REST base URL (https://…/v2). Optional.
+        ASR_BATCH_KEY (str): Speechmatics Batch API key; only needed when the primary
+            key is Realtime-scoped (keys are product-scoped: ``type=rt`` vs ``type=batch``).
         ASR_LANGUAGE (str): ASR language hint: ``fa``, ``en``, or ``auto`` for mixed audio.
         ASR_PROVIDER (str): ASR provider (local, openai, fireworks, speechmatics, ...).
         REASONING_MODEL (str): Model used for reasoning/analysis tasks.
@@ -45,6 +48,8 @@ class Config(BaseModel):
     ASR_BASE_URL: str = Field(default="")
     ASR_MODEL: str = Field(default="")
     ASR_KEY: str = Field(default="")
+    ASR_BATCH_URL: str = Field(default="")
+    ASR_BATCH_KEY: str = Field(default="")
     ASR_LANGUAGE: str = Field(default="auto")
     ASR_PROVIDER: str = Field(default="openai_compatible")
 

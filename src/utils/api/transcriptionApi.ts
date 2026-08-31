@@ -214,6 +214,11 @@ export const transcriptionApi = {
 
         const sendPcm = (samples: Int16Array) => {
             if (socket.readyState !== WebSocket.OPEN || !samples?.length) return;
+            // Speechmatics documents that sending audio faster than the engine
+            // reads it can fill TCP buffers and close the socket "with
+            // prejudice". Skip frames while the browser is already backed up
+            // (~1 MB) rather than overrun the connection.
+            if (socket.bufferedAmount > 1_000_000) return;
             // Zero-copy view over the exact byte range. The explicit
             // ArrayBuffer generic satisfies WebSocket.send() under TS 6
             // (ArrayBufferLike is no longer assignable to BufferSource).

@@ -148,8 +148,50 @@ const WhisperTab = ({
 
                 {provider === "speechmatics" && (
                     <Text fontSize="xs" color="overlay0">
-                        Speechmatics در حالت بلادرنگ از شناسایی خودکار زبان پشتیبانی نمی‌کند؛ حالت «تشخیص خودکار» در این سرویس به فارسی (fa) نگاشت می‌شود. نشانی پیش‌فرض global است و به نزدیک‌ترین منطقه مسیریابی می‌کند.
+                        Speechmatics در حالت بلادرنگ از شناسایی خودکار زبان پشتیبانی نمی‌کند؛ حالت «تشخیص خودکار» در حالت زنده به فارسی (fa) نگاشت می‌شود. فایل‌های ضبط‌شده با API دسته‌ای (Batch) پردازش می‌شوند که خودکار تشخیص زبان را پشتیبانی می‌کند. API Keys محصول‌محور هستند؛ کلید Realtime (rt) برای زنده و کلید Batch برای فایل‌ها لازم است.
                     </Text>
+                )}
+
+                {provider === "speechmatics" && (
+                    <>
+                        <Box>
+                            <Tooltip content="نشانی API دسته‌ای Speechmatics (فایل‌های ضبط‌شده). پیش‌فرض: https://eu1.asr.api.speechmatics.com/v2">
+                                <Text fontSize="sm" mb="1" fontWeight="bold">
+                                    نشانی API دسته‌ای (فایل‌ها) — اختیاری
+                                </Text>
+                            </Tooltip>
+                            <Input
+                                type="url"
+                                data-ltr="true"
+                                dir="ltr"
+                                value={config?.ASR_BATCH_URL || ""}
+                                onChange={(event) =>
+                                    handleConfigChange("ASR_BATCH_URL", event.target.value)
+                                }
+                                placeholder={selectedAsr?.batch_placeholder_url || "https://eu1.asr.api.speechmatics.com/v2"}
+                                className="input-style"
+                            />
+                        </Box>
+                        <Box>
+                            <Tooltip content="اگر کلید شما فقط برای Realtime (type=rt) ساخته شده، برای پردازش فایل‌ها یک کلید Batch (type=batch) جداگانه اینجا وارد کنید. در غیر این صورت همان کلید اصلی استفاده می‌شود.">
+                                <Text fontSize="sm" mb="1" fontWeight="bold">
+                                    کلید Batch API — اختیاری
+                                </Text>
+                            </Tooltip>
+                            <Input
+                                size="sm"
+                                type="password"
+                                dir="ltr"
+                                data-ltr="true"
+                                value={config?.ASR_BATCH_KEY || ""}
+                                onChange={(event) =>
+                                    handleConfigChange("ASR_BATCH_KEY", event.target.value)
+                                }
+                                placeholder="کلید Batch (type=batch)"
+                                className="input-style"
+                            />
+                        </Box>
+                    </>
                 )}
 
                 <Box>

@@ -278,6 +278,8 @@ ASR_PROVIDERS: dict[str, dict[str, Any]] = {
         "protocol": "speechmatics",
         "default_base_url": "wss://global.rt.speechmatics.com/v2",
         "placeholder_url": "wss://global.rt.speechmatics.com/v2",
+        "batch_base_url": "https://eu1.asr.api.speechmatics.com/v2",
+        "batch_placeholder_url": "https://eu1.asr.api.speechmatics.com/v2",
         "requires_api_key": True,
         "supports_streaming": True,
         "supports_model_list": False,
@@ -461,7 +463,14 @@ def normalize_provider_id(provider: str | None, kind: str = "llm") -> str:
 
 def public_provider(info: dict[str, Any]) -> dict[str, Any]:
     """Strip internal-only keys before sending a provider to the client."""
-    skip = {"batch_urls", "streaming_url", "streaming_url_v2", "anthropic_version"}
+    skip = {
+        "batch_urls",
+        "batch_base_url",
+        "batch_placeholder_url",
+        "streaming_url",
+        "streaming_url_v2",
+        "anthropic_version",
+    }
     return {key: value for key, value in info.items() if key not in skip}
 
 

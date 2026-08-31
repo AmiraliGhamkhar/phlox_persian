@@ -8,7 +8,7 @@ from server.database.config.manager import config_manager
 router = APIRouter()
 
 
-SENSITIVE_KEYS = {"LLM_API_KEY", "WHISPER_KEY", "ASR_KEY", "EMBEDDING_API_KEY"}
+SENSITIVE_KEYS = {"LLM_API_KEY", "WHISPER_KEY", "ASR_KEY", "ASR_BATCH_KEY", "EMBEDDING_API_KEY"}
 MASK_BULLET = "•"
 
 
